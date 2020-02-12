@@ -10,8 +10,8 @@ multiple master-compatible curve harmonizer for windows fontlab 5.2
 version 1.0
 equalizes bézier curvature at extreme vertical/horizontal points
 
-portions of curvature equalizer method from Simon Cozens
-https://gist.github.com/simoncozens (harmonization.md)
+harmonization method from Linus Romer's Curvatura for FontForge
+https://github.com/linusromer/curvatura
 
 Jameson Spires - jameson@spiratype.com
 '''
