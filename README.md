@@ -3,11 +3,11 @@
 These macros have no dependencies outside of the standard library. The `balancer_core` extension module is written in Cython and in Python 3 syntax where it is natively supported by Cython.
 
 ### Optional
-* cython
-**pip install cython**
+* cython\
+**pip install cython**\
 <https://github.com/cython/cython>
 
-* Windows GCC (MinGW) 4.3.3
+* Windows GCC (MinGW) 4.3.3\
 <https://github.com/develersrl/gccwinbinaries>
 
 ### Installation
@@ -71,15 +71,15 @@ Jameson R Spires
 Any methods not described in the credits section are covered under the [MIT License](https://opensource.org/licenses/MIT).
 
 #### Version history
-* version 0.1.4
-conversion to C++
+* version 0.1.4\
+conversion to C++\
 creation of FontLab installer
 
-* version 0.1.3
+* version 0.1.3\
 recompilation
 
-* version 0.1.1
+* version 0.1.1\
 revised `harmonize_curves()` function
 
-* version 0.1.0
+* version 0.1.0\
 initial release
