@@ -7,7 +7,6 @@ from balancer_core import balance_curves
 __doc__ = '''
 multiple master-compatible curve handle equalizer for windows fontlab 5.2
 
-version 1.0
 balances cubic bézier handle lengths of a curve segment by extending or
 retracting along original angles
 
