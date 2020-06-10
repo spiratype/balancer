@@ -4,42 +4,48 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # distutils: language=c++
+# distutils: extra_compile_args=[-Os, -m32, -fno-strict-aliasing]
 
 cdef object fl
 from FL import fl
 
+from libcpp cimport bool
 from libcpp.vector cimport vector
 
 cdef extern from '<Python.h>':
-	Py_ssize_t PyList_GET_SIZE(object list)
-
-cdef extern from '<math.h>' nogil:
-	const double M_PI
-	double atan2(double y, double x)
-	double cos(double x)
-	double sin(double x)
-	double pow(double x, double y)
-	double sqrt(double x)
-	double fabs(double x)
-	double nearbyint(double x)
+	Py_ssize_t PyList_GET_SIZE(object)
 
 cdef extern from '<fenv.h>' nogil:
 	const int FE_TONEAREST
-	int fesetround(int mode)
+	int fesetround(int)
 	int fegetround()
 
 cdef int FE_MODE = fegetround()
 
-cdef extern from *:
-	'''
-	#define M_1DEG 0.01745329251994329577
-	#define M_3DEG 0.05235987755982988731
-	'''
-	const double M_1DEG
-	const double M_3DEG
+cdef extern from 'balancer_core.hpp' nogil:
+	cppclass cpp_point:
+		double x
+		double y
+		size_t index
+		cpp_point()
+		cpp_point(double x, double y)
+		cpp_point(double x, double y, size_t index)
 
-include 'balance.pxi'
-include 'harmonize.pxi'
+	cppclass cpp_curve:
+		cpp_point p0
+		cpp_point p1
+		cpp_point p2
+		cpp_point p3
+		size_t index
+		size_t prev_index
+		bool balanced
+		bool harmonized
+		cpp_curve()
+		cpp_curve(cpp_point p0, cpp_point p1, cpp_point p2, cpp_point p3, size_t index, size_t prev_index)
+		void balance()
+		cpp_point harmonize(cpp_curve &other)
+
+	void harmonize(cpp_curve &curve, cpp_curve &next_curve)
 
 def harmonize_curves(glyph):
 	_harmonize_curves(glyph, glyph.isAnySelected())
@@ -47,10 +53,21 @@ def harmonize_curves(glyph):
 def balance_curves(glyph):
 	_balance_curves(glyph, glyph.isAnySelected())
 
+cdef vector[cpp_point] convert_points(list points):
+	cdef:
+		size_t n = PyList_GET_SIZE(points)
+		vector[cpp_point] cpp_points
+		object point
+
+	cpp_points.reserve(n)
+	for point in points:
+		cpp_points.push_back(cpp_point(point.x, point.y))
+	return cpp_points
+
 cdef void _harmonize_curves(object glyph, bint selected):
 	cdef:
-		vector[cPoint] active = Points(glyph.Layer(fl.master))
-		vector[cCurve] curves = collect_curves(glyph, selected, active)
+		vector[cpp_point] active = convert_points(glyph.Layer(fl.master))
+		vector[cpp_curve] curves = collect_curves(glyph, selected, active)
 		size_t i = 0
 		size_t prev_i = 0
 
@@ -65,41 +82,41 @@ cdef void _harmonize_curves(object glyph, bint selected):
 
 cdef void _balance_curves(object glyph, bint selected):
 	cdef:
-		vector[cPoint] active = Points(glyph.Layer(fl.master))
-		vector[cCurve] curves = collect_curves(glyph, selected, active)
+		vector[cpp_point] active = convert_points(glyph.Layer(fl.master))
+		vector[cpp_curve] curves = collect_curves(glyph, selected, active)
 
 	fesetround(FE_TONEAREST)
 	for curve in curves:
 		balance_curve(glyph, curve)
 	fesetround(FE_MODE)
 
-cdef void harmonize_curve(object glyph, cCurve &curve, cCurve &next_curve):
+cdef void harmonize_curve(object glyph, cpp_curve &curve, cpp_curve &next_curve):
 	harmonize(curve, next_curve)
 	if curve.harmonized:
 		active = glyph.Layer(fl.master)
-		active[curve.p3.index].x, active[curve.p3.index].y = nearbyint(curve.p3.x), nearbyint(curve.p3.y)
+		active[curve.p3.index].x, active[curve.p3.index].y = <int>curve.p3.x, <int>curve.p3.y
 		glyph.modified = 1
 		fl.font.modified = 1
 
-cdef void balance_curve(object glyph, cCurve &curve):
-	balance(curve)
+cdef void balance_curve(object glyph, cpp_curve &curve):
+	curve.balance()
 	if curve.balanced:
 		active = glyph.Layer(fl.master)
-		active[curve.p1.index].x, active[curve.p1.index].y = nearbyint(curve.p1.x), nearbyint(curve.p1.y)
-		active[curve.p2.index].x, active[curve.p2.index].y = nearbyint(curve.p2.x), nearbyint(curve.p2.y)
+		active[curve.p1.index].x, active[curve.p1.index].y = <int>curve.p1.x, <int>curve.p1.y
+		active[curve.p2.index].x, active[curve.p2.index].y = <int>curve.p2.x, <int>curve.p2.y
 		glyph.modified = 1
 		fl.font.modified = 1
 
-cdef vector[cCurve] collect_curves(object glyph, bint selected, vector[cPoint] &active):
+cdef vector[cpp_curve] collect_curves(object glyph, bint selected, vector[cpp_point] &active):
 	if selected:
 		return selected_curves(glyph.nodes, active)
 	return all_curves(glyph.nodes, active)
 
-cdef vector[cCurve] selected_curves(list nodes, vector[cPoint] &active):
+cdef vector[cpp_curve] selected_curves(list nodes, vector[cpp_point] &active):
 	cdef:
-		vector[cCurve] cpp_curves
+		vector[cpp_curve] cpp_curves
 		object node
-		size_t n = <size_t>PyList_GET_SIZE(nodes)
+		size_t n = PyList_GET_SIZE(nodes)
 		size_t i = 0
 		size_t prev_i = 0
 		size_t prev_curve_i = 0
@@ -109,7 +126,7 @@ cdef vector[cCurve] selected_curves(list nodes, vector[cPoint] &active):
 		size_t p2_i = 0
 		size_t p3_i = 0
 
-	cpp_curves.reserve(<size_t>n)
+	cpp_curves.reserve(n)
 	for node in nodes:
 		j = node.count
 		if node.selected:
@@ -119,11 +136,11 @@ cdef vector[cCurve] selected_curves(list nodes, vector[cPoint] &active):
 				p2_i = i+2
 				p3_i = i
 				cpp_curves.push_back(
-					Curve(
-						Point(active[p0_i].x, active[p0_i].y, p0_i),
-						Point(active[p1_i].x, active[p1_i].y, p1_i),
-						Point(active[p2_i].x, active[p2_i].y, p2_i),
-						Point(active[p3_i].x, active[p3_i].y, p3_i),
+					cpp_curve(
+						cpp_point(active[p0_i].x, active[p0_i].y, p0_i),
+						cpp_point(active[p1_i].x, active[p1_i].y, p1_i),
+						cpp_point(active[p2_i].x, active[p2_i].y, p2_i),
+						cpp_point(active[p3_i].x, active[p3_i].y, p3_i),
 						i,
 						prev_curve_i,
 						))
@@ -131,12 +148,11 @@ cdef vector[cCurve] selected_curves(list nodes, vector[cPoint] &active):
 		prev_i = i
 		i += j
 
-	cpp_curves.shrink_to_fit()
 	return cpp_curves
 
-cdef vector[cCurve] all_curves(list nodes, vector[cPoint] &active):
+cdef vector[cpp_curve] all_curves(list nodes, vector[cpp_point] &active):
 	cdef:
-		vector[cCurve] cpp_curves
+		vector[cpp_curve] cpp_curves
 		object node
 		size_t n = <size_t>PyList_GET_SIZE(nodes)
 		size_t i = 0
@@ -148,7 +164,7 @@ cdef vector[cCurve] all_curves(list nodes, vector[cPoint] &active):
 		size_t p2_i = 0
 		size_t p3_i = 0
 
-	cpp_curves.reserve(<size_t>n)
+	cpp_curves.reserve(n)
 	for node in nodes:
 		j = node.count
 		if j > 1:
@@ -157,11 +173,11 @@ cdef vector[cCurve] all_curves(list nodes, vector[cPoint] &active):
 			p2_i = i+2
 			p3_i = i
 			cpp_curves.push_back(
-				Curve(
-					Point(active[p0_i].x, active[p0_i].y, p0_i),
-					Point(active[p1_i].x, active[p1_i].y, p1_i),
-					Point(active[p2_i].x, active[p2_i].y, p2_i),
-					Point(active[p3_i].x, active[p3_i].y, p3_i),
+				cpp_curve(
+					cpp_point(active[p0_i].x, active[p0_i].y, p0_i),
+					cpp_point(active[p1_i].x, active[p1_i].y, p1_i),
+					cpp_point(active[p2_i].x, active[p2_i].y, p2_i),
+					cpp_point(active[p3_i].x, active[p3_i].y, p3_i),
 					i,
 					prev_curve_i,
 					))
@@ -169,5 +185,4 @@ cdef vector[cCurve] all_curves(list nodes, vector[cPoint] &active):
 		prev_i = i
 		i += j
 
-	cpp_curves.shrink_to_fit()
 	return cpp_curves
