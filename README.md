@@ -3,33 +3,33 @@
 These macros have no dependencies outside of the standard library. The `balancer_core` extension module is written in Cython and in Python 3 syntax where it is natively supported by Cython.
 
 ### Optional
-* cython\
-**pip install cython**\
-<https://github.com/cython/cython>
+* cython  
+**pip install cython**  
+<https://github.com/cython/cython>  
 
-* Windows GCC (MinGW) 4.3.3\
-<https://github.com/develersrl/gccwinbinaries>
+* Windows GCC (MinGW) 4.3.3  
+<https://github.com/develersrl/gccwinbinaries>  
 
 ### Installation
 #### FontLab Installer
-Download the FontLab installer (`.flw`) file and drag it into the FontLab main window then restart FontLab or reset macro system.
+Download the lastest release FontLab installer (`.flw`) file and drag it into the FontLab main window then restart FontLab or reset macro system.
 
 #### ZIP Archive
-Download and extract the latest `.zip` file and move the extracted files to your FontLab Macros folder. The default directory structure is shown below.
+Download and extract the latest release `.zip` file and move the extracted files to your FontLab Macros folder. The default directory structure is shown below.
 
 ```
 [user folder]
-  `-- Documents
-      `-- Fontlab
-          `-- Studio 5
-              `-- Macros
-                  |-- balancer
-                  |   `-- balancer.py
-                  |-- harmonizer
-                  |   `-- harmonizer.py
-                  `-- System
-                      `-- Modules
-                          `--balancer_core.pyd
+    └── Documents
+        └── Fontlab
+            └── Studio 5
+                └── Macros
+                    ├── balancer
+                    |   └── balancer.py
+                    ├── harmonizer
+                    |   └── harmonizer.py
+                    └── System
+                        └── Modules
+                            └── balancer_core.pyd
 ```
 
 ### Functionality
@@ -71,15 +71,18 @@ Jameson R Spires
 Any methods not described in the credits section are covered under the [MIT License](https://opensource.org/licenses/MIT).
 
 #### Version history
-* version 0.1.4\
-conversion to C++\
-creation of FontLab installer
+* version 0.1.5  
+small changes  
 
-* version 0.1.3\
-recompilation
+* version 0.1.4  
+conversion to C++  
+creation of FontLab installer  
 
-* version 0.1.1\
-revised `harmonize_curves()` function
+* version 0.1.3  
+recompilation  
 
-* version 0.1.0\
-initial release
+* version 0.1.1  
+revised `harmonize_curves()` function  
+
+* version 0.1.0  
+initial release  
