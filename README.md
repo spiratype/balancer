@@ -9,7 +9,7 @@ These macros have no dependencies outside of the standard library. The `balancer
   **pip install cython**  
   <a>https://github.com/cython/cython</a>  
 
-* Windows GCC (MinGW) 4.3.1  
+* Windows GCC (MinGW) 4.3.3  
   <a>https://github.com/develersrl/gccwinbinaries</a>  
 
 
@@ -41,7 +41,7 @@ Download and extract the latest release `ZIP` file and move the extracted files 
 
 `balance_curves()` and `harmonize_curves()` from the `balancer_core` extension module are the core functions. The `balancer.py` and `harmonize.py` macros will run with the glyph window open. If any curve nodes/segments are selected (highlighted), only those curve nodes/segments which are selected will be balanced and/or harmonized. These two macros can be assigned to keyboard shortcuts for quick access.
 
-The `harmonize_curves()` method only harmonizes curves with extreme points with handles running exactly vertical or horizontal.
+The `harmonize_curves()` method only harmonizes curves with handles running exactly vertical or horizontal.
 
 These functions are agnostic and any changes it makes should **not** be construed as *better* in any way. The designer should always trust their eyes when evaluating glyph outlines, since they are the only one who would know how they want the outline to appear. For this reason, it is suggested to run these from the glyph window so any changes can be made on a case-by-case basis.
 
