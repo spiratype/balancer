@@ -1,174 +1,193 @@
 # coding: utf-8
 # cython: language_level=2
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
+# cython: wraparound=False, boundscheck=False
+# cython: infer_types=True, cdivision=True, auto_pickle=False
 # distutils: language=c++
-# distutils: extra_compile_args=[-O3, -fno-strict-aliasing]
+# distutils: extra_compile_args=[-std=c++0x, -Os, -Wall, -Wno-format, -ffast-math, -fno-strict-aliasing]
+
 from FL import fl
 
-from libcpp cimport bool
-from libcpp.vector cimport vector
+from cython.operator cimport postincrement as postincr
 
-cdef extern from '<fenv.h>':
-	const int FE_TONEAREST
-	int fesetround(int)
+cdef f64 MIN = 1.0 if fl.font.upm < 2048 else 3.0
 
-cdef extern from 'balancer_core.hpp' nogil:
-	cppclass cpp_point:
-		double x
-		double y
-		size_t index
-		cpp_point()
-		cpp_point(double, double)
-		cpp_point(double, double, size_t)
-
-	cppclass cpp_curve:
-		cpp_point p0
-		cpp_point p1
-		cpp_point p2
-		cpp_point p3
-		size_t index
-		size_t prev_index
-		bool balanced
-		bool harmonized
-		cpp_curve()
-		cpp_curve(cpp_point, cpp_point, cpp_point, cpp_point, size_t, size_t)
-		void balance()
-		cpp_point harmonize(cpp_curve)
-
-	void harmonize(cpp_curve, cpp_curve)
+MOVE = 17
 
 def harmonize_curves(glyph):
-	_harmonize_curves(glyph, glyph.isAnySelected())
+  nodes = glyph.nodes
+  if nodes:
+    active = glyph.Layer(fl.master)
+    if glyph.isAnySelected():
+      _harmonize_selected_curves(nodes, active)
+    else:
+      _harmonize_all_curves(nodes, active)
+
 
 def balance_curves(glyph):
-	_balance_curves(glyph, glyph.isAnySelected())
+  nodes = glyph.nodes
+  if nodes:
+    active = glyph.Layer(fl.master)
+    if glyph.isAnySelected():
+      _balance_selected_curves(nodes, active)
+    else:
+      _balance_all_curves(nodes, active)
 
-cdef vector[cpp_point] convert_points(points):
 
-	cdef vector[cpp_point] cpp_points
+cdef void _harmonize_curve_pair(active, ssize p0_i, ssize p1_i, ssize p2_i, ssize p3_i, ssize p4_i, ssize p5_i, ssize p6_i, ssize pmove_i):
+  p0 = PySequence_ITEM(active, p0_i)
+  p1 = PySequence_ITEM(active, p1_i)
+  p2 = PySequence_ITEM(active, p2_i)
+  p3 = PySequence_ITEM(active, p3_i)
+  p4 = PySequence_ITEM(active, p4_i)
+  p5 = PySequence_ITEM(active, p5_i)
+  p6 = PySequence_ITEM(active, p6_i)
+  if pmove_i > -1:
+    pmove = PySequence_ITEM(active, pmove_i)
+  cdef i32 p0_x = p0.x, p0_y = p0.y
+  cdef i32 p1_x = p1.x, p1_y = p1.y
+  cdef i32 p2_x = p2.x, p2_y = p2.y
+  cdef i32 p3_x = p3.x, p3_y = p3.y
+  cdef i32 p4_x = p4.x, p4_y = p4.y
+  cdef i32 p5_x = p5.x, p5_y = p5.y
+  cdef i32 p6_x = p6.x, p6_y = p6.y
+  cdef cpp_curve curve = cpp_curve(p0_x, p0_y, p1_x, p1_y, p2_x, p2_y, p3_x, p3_y)
+  cdef cpp_curve curve_next = cpp_curve(p3_x, p3_y, p4_x, p4_y, p5_x, p5_y, p6_x, p6_y)
 
-	cpp_points.reserve(len(points))
-	for point in points:
-		cpp_points.push_back(cpp_point(point.x, point.y))
-	return cpp_points
+  curve.harmonize(curve_next)
+  if curve.harmonized:
+    if curve.horizontal and fabs(curve.p3.x - p3_x) > MIN:
+      p3.x = PyInt_FromLong(<i32>curve.p3.x)
+      if pmove_i > -1:
+        pmove.x = PyInt_FromLong(<i32>curve.p3.x)
+    elif fabs(curve.p3.y - p3_y) > MIN:
+      p3.y = PyInt_FromLong(<i32>curve.p3.y)
+      if pmove_i > -1:
+        pmove.y = PyInt_FromLong(<i32>curve.p3.y)
 
-cdef void _harmonize_curves(glyph, bint selected):
-	cdef:
-		vector[cpp_point] active = convert_points(glyph.Layer(fl.master))
-		vector[cpp_curve] curves = collect_curves(glyph, selected, active)
-		cpp_curve curve
-		size_t i = 0
-		size_t prev_i = 0
 
-	fesetround(FE_TONEAREST)
-	for curve in curves:
-		if i:
-			if curve.index - curve.prev_index == 3:
-				harmonize_curve(glyph, curves[prev_i], curve)
-		prev_i = i
-		i += 1
+cdef void _harmonize_all_curves(nodes, active):
+  cdef ssize i = 0, j = 0, prev_i = 0, node_i = 0
+  cdef ssize end_i = 0, start_i = 0, next_i = 0
+  cdef ssize nodes_n = PySequence_Size(nodes)
+  cdef ssize active_n = PySequence_Size(active)
+  cdef ssize contours_n = 0
+  cdef pod_vector[cpp_point_indices] points
+  cdef pod_vector[ssize] contour_lens
+  points.reserve(active_n)
+  contour_lens.reserve(nodes_n // 2)
 
-cdef void _balance_curves(glyph, bint selected):
-	cdef:
-		vector[cpp_point] active = convert_points(glyph.Layer(fl.master))
-		vector[cpp_curve] curves = collect_curves(glyph, selected, active)
-		cpp_curve curve
+  for node_i in range(nodes_n):
+    node = PySequence_ITEM(nodes, node_i)
+    if node.type == MOVE:
+      if node_i:
+        contour_lens.push_back(node_i - start_i)
+      postincr(contours_n)
+      start_i = node_i
+    j = node.count
+    if j > 1:
+      points[node_i] = cpp_point_indices(prev_i, i + 1, i + 2, i)
+      if i + 5 < active_n:
+        _harmonize_curve_pair(active, prev_i, i + 1, i + 2, i, i + 4, i + 5, i + 3, -1)
+    prev_i = i
+    i += j
+  contour_lens.push_back(node_i + 1 - start_i)
 
-	fesetround(FE_TONEAREST)
-	for curve in curves:
-		balance_curve(glyph, curve)
+  start_i = 0
+  for i in range(contours_n):
+    end_i = start_i + contour_lens[i] - 1
+    next_i = start_i + 1
+    start_node = PySequence_ITEM(nodes, start_i)
+    end_node = PySequence_ITEM(nodes, end_i)
+    start_i = end_i + 1
+    if start_node.points[0] == end_node.points[0]:
+      end, next = points[end_i], points[next_i]
+      if end[0] != -1 and next[0] != -1:
+        _harmonize_curve_pair(active, end[0], end[1], end[2], end[3], next[1], next[2], next[3], next[0])
 
-cdef void harmonize_curve(glyph, cpp_curve &curve, cpp_curve &next_curve):
-	harmonize(curve, next_curve)
-	if curve.harmonized:
-		active = glyph.Layer(fl.master)
-		active[curve.p3.index].x, active[curve.p3.index].y = int(curve.p3.x), int(curve.p3.y)
-		glyph.modified = 1
-		fl.font.modified = 1
 
-cdef void balance_curve(glyph, cpp_curve &curve):
-	curve.balance()
-	if curve.balanced:
-		active = glyph.Layer(fl.master)
-		active[curve.p1.index].x, active[curve.p1.index].y = int(curve.p1.x), int(curve.p1.y)
-		active[curve.p2.index].x, active[curve.p2.index].y = int(curve.p2.x), int(curve.p2.y)
-		glyph.modified = 1
-		fl.font.modified = 1
+cdef void _harmonize_selected_curves(nodes, active):
+  cdef ssize i = 0, j = 0, prev_i = 0, node_i = 0
+  cdef ssize end_i = 0, start_i = 0, next_i = 0
+  cdef ssize nodes_n = PySequence_Size(nodes)
+  cdef ssize active_n = PySequence_Size(active)
+  cdef ssize contours_n = 0
+  cdef pod_vector[cpp_point_indices] points
+  cdef pod_vector[ssize] contour_lens
+  points.reserve(active_n)
+  contour_lens.reserve(nodes_n // 2)
 
-cdef vector[cpp_curve] collect_curves(glyph, bint selected, vector[cpp_point] &active):
-	if selected:
-		return selected_curves(glyph.nodes, active)
-	return all_curves(glyph.nodes, active)
+  for node_i in range(nodes_n):
+    node = PySequence_ITEM(nodes, node_i)
+    if node.type == MOVE:
+      if node_i:
+        contour_lens.push_back(node_i - start_i)
+      postincr(contours_n)
+      start_i = node_i
+    j = node.count
+    if j > 1:
+      points[node_i] = cpp_point_indices(prev_i, i + 1, i + 2, i)
+      if i + 5 < active_n and node.selected:
+        _harmonize_curve_pair(active, prev_i, i + 1, i + 2, i, i + 4, i + 5, i + 3, -1)
+    prev_i = i
+    i += j
+  contour_lens.push_back(node_i + 1 - start_i)
 
-cdef vector[cpp_curve] selected_curves(nodes, vector[cpp_point] &active):
-	cdef:
-		vector[cpp_curve] cpp_curves
-		size_t i = 0
-		size_t prev_i = 0
-		size_t prev_curve_i = 0
-		size_t j = 0
-		size_t p0_i = 0
-		size_t p1_i = 0
-		size_t p2_i = 0
-		size_t p3_i = 0
+  start_i = 0
+  for i in range(contours_n):
+    end_i = start_i + contour_lens[i] - 1
+    next_i = start_i + 1
+    start_node = PySequence_ITEM(nodes, start_i)
+    end_node = PySequence_ITEM(nodes, end_i)
+    next_node = PySequence_ITEM(nodes, next_i)
+    start_i = end_i + 1
+    if not end_node.selected:
+      continue
+    if start_node.points[0] == end_node.points[0]:
+      end, next = points[end_i], points[next_i]
+      if end[0] != -1 and next[0] != -1:
+        _harmonize_curve_pair(active, end[0], end[1], end[2], end[3], next[1], next[2], next[3], next[0])
 
-	cpp_curves.reserve(len(nodes))
-	for node in nodes:
-		j = node.count
-		if node.selected:
-			if j > 1:
-				p0_i = prev_i
-				p1_i = i+1
-				p2_i = i+2
-				p3_i = i
-				cpp_curves.push_back(
-					cpp_curve(
-						cpp_point(active[p0_i].x, active[p0_i].y, p0_i),
-						cpp_point(active[p1_i].x, active[p1_i].y, p1_i),
-						cpp_point(active[p2_i].x, active[p2_i].y, p2_i),
-						cpp_point(active[p3_i].x, active[p3_i].y, p3_i),
-						i,
-						prev_curve_i,
-						))
-				prev_curve_i = i
-		prev_i = i
-		i += j
 
-	return cpp_curves
+cdef void _balance_curve(active, ssize p0_i, ssize p1_i, ssize p2_i, ssize p3_i):
+  p0 = PySequence_ITEM(active, p0_i)
+  p1 = PySequence_ITEM(active, p1_i)
+  p2 = PySequence_ITEM(active, p2_i)
+  p3 = PySequence_ITEM(active, p3_i)
+  cdef i32 p0_x = p0.x, p0_y = p0.y
+  cdef i32 p1_x = p1.x, p1_y = p1.y
+  cdef i32 p2_x = p2.x, p2_y = p2.y
+  cdef i32 p3_x = p3.x, p3_y = p3.y
+  cdef cpp_curve curve = cpp_curve(p0_x, p0_y, p1_x, p1_y, p2_x, p2_y, p3_x, p3_y)
 
-cdef vector[cpp_curve] all_curves(nodes, vector[cpp_point] &active):
-	cdef:
-		vector[cpp_curve] cpp_curves
-		size_t i = 0
-		size_t prev_i = 0
-		size_t prev_curve_i = 0
-		size_t j = 0
-		size_t p0_i = 0
-		size_t p1_i = 0
-		size_t p2_i = 0
-		size_t p3_i = 0
+  curve.balance()
+  if curve.balanced:
+    if fabs(curve.p1.x - p1_x) > MIN or fabs(curve.p1.y - p1_y) > MIN:
+      p1.x = PyInt_FromLong(<i32>curve.p1.x)
+      p1.y = PyInt_FromLong(<i32>curve.p1.y)
+    if fabs(curve.p2.x - p2_x) > MIN or fabs(curve.p2.y - p2_y) > MIN:
+      p2.x = PyInt_FromLong(<i32>curve.p2.x)
+      p2.y = PyInt_FromLong(<i32>curve.p2.y)
 
-	cpp_curves.reserve(len(nodes))
-	for node in nodes:
-		j = node.count
-		if j > 1:
-			p0_i = prev_i
-			p1_i = i+1
-			p2_i = i+2
-			p3_i = i
-			cpp_curves.push_back(
-				cpp_curve(
-					cpp_point(active[p0_i].x, active[p0_i].y, p0_i),
-					cpp_point(active[p1_i].x, active[p1_i].y, p1_i),
-					cpp_point(active[p2_i].x, active[p2_i].y, p2_i),
-					cpp_point(active[p3_i].x, active[p3_i].y, p3_i),
-					i,
-					prev_curve_i,
-					))
-			prev_curve_i = i
-		prev_i = i
-		i += j
 
-	return cpp_curves
+cdef void _balance_all_curves(nodes, active):
+  cdef ssize i = 0, j = 0, prev_i = 0, node_i = 0, n = PySequence_Size(nodes)
+
+  for node_i in range(n):
+    node = PySequence_ITEM(nodes, node_i)
+    j = node.count
+    if j > 1:
+      _balance_curve(active, prev_i, i + 1, i + 2, i)
+    prev_i = i
+    i += j
+
+
+cdef void _balance_selected_curves(nodes, active):
+  cdef ssize i = 0, j = 0, prev_i = 0, node_i = 0, n = PySequence_Size(nodes)
+
+  for node_i in range(n):
+    node = PySequence_ITEM(nodes, node_i)
+    j = node.count
+    if j > 1 and node.selected:
+      _balance_curve(active, prev_i, i + 1, i + 2, i)
+    prev_i = i
+    i += j

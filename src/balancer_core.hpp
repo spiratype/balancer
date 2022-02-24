@@ -1,174 +1,214 @@
 // balancer_core.hpp
 
+#pragma once
+
+#include <fenv.h>
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 
-const double M_1DEG = 0.01745329252;
-const double M_3DEG = 0.05235987756;
+typedef size_t usize;
+typedef double f64;
+typedef signed long i32;
+typedef signed long ssize;
 
-class cpp_curve;
+const usize npos = -1;
 
-class cpp_handles {
-	public:
-		double a;
-		double b;
-		cpp_handles() {}
-		cpp_handles(double a, double b) {
-			this->a = a;
-			this->b = b;
-			}
-	};
-
-class cpp_point {
-	public:
-		double x;
-		double y;
-		size_t index;
-		cpp_point() {}
-		cpp_point(double x, double y, size_t index=0) {
-			this->x = x;
-			this->y = y;
-			this->index = index;
-			}
-		double distance(cpp_point &other) const {
-			return sqrt(pow(this->x - other.x, 2) + pow(this->y - other.y, 2));
-			}
-		double angle(cpp_point &other) const {
-			return atan2(other.y - this->y, other.x - this->x);
-			}
-	};
-
-cpp_handles curve_sides(cpp_curve &curve, double p0_p1, double p0_p3);
-void move_handles(cpp_point &handle_point, cpp_point &b, cpp_point &c, double distance);
-double harmonize_distance(cpp_point &p0, cpp_point &p1, cpp_point &p2);
-
-class cpp_curve {
-	public:
-		cpp_point p0;
-		cpp_point p1;
-		cpp_point p2;
-		cpp_point p3;
-		size_t index;
-		size_t prev_index;
-		bool balanced;
-		bool harmonized;
-		cpp_curve() {}
-		cpp_curve(cpp_point p0, cpp_point p1, cpp_point p2, cpp_point p3, size_t index, size_t prev_index) {
-			this->p0 = p0;
-			this->p1 = p1;
-			this->p2 = p2;
-			this->p3 = p3;
-			this->index = index;
-			this->prev_index = prev_index;
-			}
-
-		void balance() {
-			const bool both_vertical = (this->p1.y - this->p0.y) == 0.0 and (this->p2.y - this->p3.y) == 0.0;
-			const bool both_horizontal = (this->p1.x - this->p0.x) == 0.0 and (this->p2.x - this->p3.x) == 0.0;
-			this->balanced = false;
-
-			if (both_vertical or both_horizontal)
-				return;
-
-			const double p0_p3 = this->p0.angle(this->p3);
-			const double p0_p1 = this->p0.angle(this->p1);
-			const double p2_p3 = this->p2.angle(this->p3);
-			const double handle_1 = p0_p3 - p0_p1;
-			const double handle_2 = p2_p3 - p0_p3;
-			const bool both_left_side = handle_1 > M_1DEG and handle_2 > M_1DEG;
-			const bool both_right_side = handle_1 < -M_1DEG and handle_2 < -M_1DEG;
-			cpp_handles handles;
-
-			if (both_left_side or both_right_side) {
-				if (fabs(handle_1) + fabs(handle_2) >= M_3DEG) {
-					handles = this->curve_sides(p0_p1, p0_p3);
-					move_handles(this->p2, this->p3, this->p1, handles.a);
-					move_handles(this->p1, this->p0, this->p2, handles.b);
-					this->balanced = 1;
-					}
-				}
-			}
-
-		cpp_handles curve_sides(const double p0_p1, const double p0_p3) {
-			const double alpha = p0_p3 - p0_p1;
-			const double gamma =
-				atan2(this->p3.x - this->p0.x, this->p3.y - this->p0.y) -
-				atan2(this->p3.x - this->p2.x, this->p3.y - this->p2.y);
-			const double beta = M_PI - alpha - gamma;
-			const double sin_beta = sin(beta);
-			const double b = p0.distance(this->p3);
-			const double a = b * sin(alpha) / sin_beta;
-			const double c = b * sin(gamma) / sin_beta;
-			const double ratio = this->handle_ratio(a, c);
-			cpp_handles handles = cpp_handles(a * ratio, c * ratio);
-			return handles;
-			}
-
-		double handle_ratio(const double a, const double c) {
-			return ((this->p3.distance(this->p2) / a) + (this->p0.distance(this->p1) / c)) / 2.0;
-			}
-
-		cpp_point harmonize(cpp_curve &other) {
-
-			if (this->p2.x == other.p1.x and this->p2.y == other.p1.y)
-				return this->p3;
-
-			const double d0 = harmonize_distance(this->p1, this->p2, other.p1);
-			const double d1 = harmonize_distance(other.p2, this->p2, other.p1);
-
-			if (d0 == d1) return cpp_point(0.5 * (this->p2.x + other.p1.x),
-					0.5 * (this->p2.y + other.p1.y));
-
-			const double t = (d0 - sqrt(d0 * d1)) / (d0 - d1);
-			const double t_1 = 1.0 - t;
-
-			return cpp_point(t_1 * this->p2.x + t * other.p1.x, t_1 * this->p2.y + t * other.p1.y);
-			}
-	};
+template<typename any_t>
+struct pod_vector {
+  any_t* m_ptr;
+  usize m_len, m_cap;
+  pod_vector() : m_ptr(NULL), m_len(0), m_cap(0) {}
+  ~pod_vector() {
+    if (m_ptr)
+      free(m_ptr);
+    }
+  void reserve(usize cap) {
+    if (!m_ptr) {
+      m_ptr = (any_t*)malloc(cap * sizeof(any_t));
+      for (usize i = 0; i < cap; i++)
+        m_ptr[i] = any_t();
+      m_cap = cap;
+      }
+    else if (cap > m_cap) {
+      m_ptr = (any_t*)realloc((void*)m_ptr, cap * sizeof(any_t));
+      for (usize i = m_cap; i < cap; i++)
+        m_ptr[i] = any_t();
+      m_cap = cap;
+      }
+    }
+  usize find(const any_t &val) const {
+    if (!m_len)
+      return npos;
+    for (usize i; i < m_len; i++)
+      if (m_ptr[i] == val)
+        return i;
+    return npos;
+    }
+  void push_back(const any_t &val) {
+    if (m_len + 1 >= m_cap)
+      this->reserve(m_cap++);
+    m_ptr[m_len++] = val;
+    }
+  usize size() const {
+    return m_len;
+    }
+  any_t& operator[](usize i) {
+    return m_ptr[i];
+    }
+  };
 
 
-void move_handles(cpp_point &handle_point, cpp_point &b, cpp_point &c, const double distance) {
-	double alpha = 0.0;
-	double beta = 0.0;
-	double phi = 0.0;
+namespace balancer {
 
-	if (handle_point.x == b.x and handle_point.y == b.y) {
-		alpha = c.y - b.y;
-		beta = c.x - b.x;
-		}
-	else {
-		alpha = handle_point.y - b.y;
-		beta = handle_point.x - b.x;
-		}
+const f64 M_PI = 3.14159265359;
+const f64 M_1DEG = 0.01745329252;
+const f64 M_3DEG = 0.05235987756;
 
-	phi = atan2(alpha, beta);
-	handle_point.x = nearbyint(b.x + (cos(phi) * distance));
-	handle_point.y = nearbyint(b.y + (sin(phi) * distance));
-	}
+struct point {
+  f64 x, y;
+  bool harmonized;
+  point() : x(0.0), y(0.0), harmonized(false) {}
+  point(f64 x, f64 y) : x(x), y(y), harmonized(false) {}
+  f64 distance(const point &other) const {
+    return hypot(this->x - other.x, this->y - other.y);
+    }
+  f64 angle(const point &other) const {
+    return atan2(other.y - this->y, other.x - this->x);
+    }
+  };
 
-void harmonize(cpp_curve &curve, cpp_curve &next_curve) {
-	const bool horizontal = curve.p2.y == next_curve.p1.y;
-	const bool vertical = curve.p2.x == next_curve.p1.x;
-	cpp_point p3;
 
-	curve.harmonized = false;
+struct point_indices {
+  ssize m_indices[4];
+  point_indices() : m_indices({-1, 0, 0, 0}) {}
+  point_indices(ssize a, ssize b, ssize c, ssize d) : m_indices({a, b, c, d}) {}
+  ssize operator[](usize i) {
+    return m_indices[i];
+    }
+  };
 
-	if (horizontal or vertical) {
 
-		p3 = curve.harmonize(next_curve);
-		curve.harmonized = true;
+struct handles {
+  f64 a, b;
+  handles() : a(0.0), b(0.0) {}
+  handles(f64 a, f64 b) : a(a), b(b) {}
+  };
 
-		if (horizontal) {
-			curve.p3.x = nearbyint(p3.x);
-			}
-		else {
-			curve.p3.y = nearbyint(p3.y);
-			}
-		}
-	}
 
-double harmonize_distance(cpp_point &p0, cpp_point &p1, cpp_point &p2) {
-	const double i = p2.x - p1.x;
-	const double j = p2.y - p1.y;
-	return fabs((((p0.y - p1.y) * i) - ((p0.x - p1.x) * j)) / sqrt(pow(i, 2) + pow(j, 2)));
-	}
+struct curve {
+  balancer::point p0, p1, p2, p3;
+  bool balanced, harmonized, horizontal;
+  curve() {}
+  curve(f64 p0x, f64 p0y, f64 p1x, f64 p1y, f64 p2x, f64 p2y, f64 p3x, f64 p3y) :
+      p0(p0x, p0y), p1(p1x, p1y), p2(p2x, p2y), p3(p3x, p3y), balanced(false), harmonized(false), horizontal(false) {}
+  void balance();
+  void harmonize(const balancer::curve &next);
+  f64 handle_ratio(const f64 a, const f64 c) const {
+    return ((this->p3.distance(this->p2) / a) + (this->p0.distance(this->p1) / c)) / 2.0;
+    }
+  balancer::point harmonized_point(const balancer::curve &next) const;
+  };
+
+
+static void move_handle_point(balancer::point &handle_point, const balancer::point &b, const balancer::point &c, const f64 distance) {
+  f64 alpha = 0.0, beta = 0.0;
+
+  if (handle_point.x == b.x and handle_point.y == b.y) {
+    alpha = c.y - b.y;
+    beta = c.x - b.x;
+    }
+  else {
+    alpha = handle_point.y - b.y;
+    beta = handle_point.x - b.x;
+    }
+
+  const f64 phi = atan2(alpha, beta);
+  handle_point.x = nearbyint(b.x + (cos(phi) * distance));
+  handle_point.y = nearbyint(b.y + (sin(phi) * distance));
+  }
+
+
+balancer::handles balanced_handles(const balancer::curve &curve, const f64 p0_p1, const f64 p0_p3) {
+  const f64 alpha = p0_p3 - p0_p1;
+  const f64 gamma = atan2(curve.p3.x - curve.p0.x, curve.p3.y - curve.p0.y) -
+      atan2(curve.p3.x - curve.p2.x, curve.p3.y - curve.p2.y);
+  const f64 beta = M_PI - alpha - gamma;
+  const f64 sin_beta = sin(beta);
+  const f64 b = curve.p0.distance(curve.p3);
+  const f64 a = b * sin(alpha) / sin_beta;
+  const f64 c = b * sin(gamma) / sin_beta;
+  const f64 ratio = curve.handle_ratio(a, c);
+  return balancer::handles(a * ratio, c * ratio);
+  }
+
+
+void curve::harmonize(const balancer::curve &next_curve) {
+  this->harmonized = false;
+  this->horizontal = this->p2.y == next_curve.p1.y;
+  const bool vertical = this->p2.x == next_curve.p1.x;
+  balancer::point p;
+
+  if (this->horizontal or vertical) {
+
+    p = this->harmonized_point(next_curve);
+    this->harmonized = true;
+
+    if (this->horizontal)
+      this->p3.x = nearbyint(p.x);
+    else
+      this->p3.y = nearbyint(p.y);
+    }
+  }
+
+
+void curve::balance() {
+  const bool both_vertical = (this->p1.y - this->p0.y) == 0.0 and (this->p2.y - this->p3.y) == 0.0;
+  const bool both_horizontal = (this->p1.x - this->p0.x) == 0.0 and (this->p2.x - this->p3.x) == 0.0;
+  this->balanced = false;
+
+  if (both_vertical or both_horizontal)
+    return;
+
+  const f64 p0_p3 = this->p0.angle(this->p3);
+  const f64 p0_p1 = this->p0.angle(this->p1);
+  const f64 p2_p3 = this->p2.angle(this->p3);
+  const f64 handle_1 = p0_p3 - p0_p1;
+  const f64 handle_2 = p2_p3 - p0_p3;
+  const bool both_left_side = handle_1 > M_1DEG and handle_2 > M_1DEG;
+  const bool both_right_side = handle_1 < -M_1DEG and handle_2 < -M_1DEG;
+  balancer::handles handles;
+
+  if ((both_left_side or both_right_side) and (fabs(handle_1) + fabs(handle_2) >= M_3DEG)) {
+    handles = balanced_handles(*this, p0_p1, p0_p3);
+    move_handle_point(this->p2, this->p3, this->p1, handles.a);
+    move_handle_point(this->p1, this->p0, this->p2, handles.b);
+    this->balanced = true;
+    }
+  }
+
+
+static inline f64 harmonize_distance(const balancer::point &p0, const balancer::point &p1, const balancer::point &p2) {
+  const f64 dx = p2.x - p1.x, dy = p2.y - p1.y;
+  return fabs((((p0.y - p1.y) * dx) - ((p0.x - p1.x) * dy)) / hypot(dx, dy));
+  }
+
+
+balancer::point curve::harmonized_point(const balancer::curve &next) const {
+
+  if (this->p2.x == next.p1.x and this->p2.y == next.p1.y)
+    return this->p3;
+
+  const f64 d0 = harmonize_distance(this->p1, this->p2, next.p1);
+  const f64 d1 = harmonize_distance(next.p2, this->p2, next.p1);
+
+  if (d0 == d1)
+    return balancer::point(0.5 * (this->p2.x + next.p1.x), 0.5 * (this->p2.y + next.p1.y));
+
+  const f64 t = (d0 - sqrt(d0 * d1)) / (d0 - d1);
+  const f64 t_1 = 1.0 - t;
+
+  return balancer::point(t_1 * this->p2.x + t * next.p1.x, t_1 * this->p2.y + t * next.p1.y);
+  }
+
+} // namespace balancer
